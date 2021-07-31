@@ -385,6 +385,7 @@ $allMethodsContent
     }
 
     parameterName = parameterName.replaceAll(',', '');
+    parameterName = parameterName.split('.').last;
 
     var name = <String>[];
     exceptionWords.forEach((String element) {
