@@ -14,6 +14,7 @@ class SwaggerRequest {
     this.parameters = const [],
     this.produces = const [],
     this.requestBody,
+    this.tags = const [],
   });
 
   SwaggerRequest.fromJson(Map<String, dynamic> json)
@@ -22,6 +23,10 @@ class SwaggerRequest {
         description = json['description'] as String? ?? '',
         operationId = json['operationId'] as String? ?? '',
         consumes = (json['consumes'] as List<dynamic>?)
+                ?.map((dynamic e) => e.toString())
+                .toList() ??
+            <String>[],
+        tags = (json['tags'] as List<dynamic>?)
                 ?.map((dynamic e) => e.toString())
                 .toList() ??
             <String>[],
@@ -40,6 +45,7 @@ class SwaggerRequest {
   String operationId;
   List<String> consumes;
   List<String> produces;
+  List<String> tags;
   List<SwaggerResponse> responses;
   List<SwaggerRequestParameter> parameters;
   RequestBody? requestBody;

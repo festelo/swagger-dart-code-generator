@@ -1,16 +1,22 @@
 import 'dart:convert';
 
+import 'package:swagger_dart_code_generator/src/extensions/file_name_extensions.dart';
 import 'package:swagger_dart_code_generator/src/models/generator_options.dart';
 import 'package:swagger_dart_code_generator/src/code_generators/swagger_models_generator.dart';
 import 'package:swagger_dart_code_generator/src/extensions/string_extension.dart';
 import 'package:swagger_dart_code_generator/src/swagger_models/requests/swagger_request.dart';
 import 'package:swagger_dart_code_generator/src/swagger_models/requests/swagger_request_parameter.dart';
 import 'package:swagger_dart_code_generator/src/swagger_models/responses/swagger_response.dart';
-import 'package:swagger_dart_code_generator/src/swagger_models/swagger_path.dart';
 import 'package:swagger_dart_code_generator/src/swagger_models/swagger_root.dart';
 import 'package:recase/recase.dart';
 import 'package:swagger_dart_code_generator/src/exception_words.dart';
 import 'package:collection/collection.dart';
+
+class RequestWithPath {
+  final String path;
+  final SwaggerRequest request;
+  RequestWithPath(this.request, this.path);
+}
 
 abstract class SwaggerRequestsGenerator {
   static const String defaultBodyParameter = 'Object';
@@ -43,7 +49,7 @@ $allMethodsContent
   String getFileContent(
     SwaggerRoot swaggerRoot,
     String dartCode,
-    String className,
+    String _,
     String fileName,
     GeneratorOptions options,
     bool hasModels,
@@ -51,22 +57,72 @@ $allMethodsContent
     List<String> dynamicResponses,
     Map<String, String> basicTypesMap,
   ) {
-    final classContent =
-        getRequestClassContent(swaggerRoot.host, className, fileName, options);
-    final chopperClientContent = getChopperClientContent(
-        className, swaggerRoot.host, swaggerRoot.basePath, options, hasModels);
-    final allMethodsContent = getAllMethodsContent(
-      swaggerRoot,
-      dartCode,
-      options,
-      allEnumNames,
-      dynamicResponses,
-      basicTypesMap,
-    );
-    final result = generateFileContent(
-        classContent, chopperClientContent, allMethodsContent);
+    final tagToRequestWithPath = <String, List<RequestWithPath>>{};
+    for (final path in swaggerRoot.paths) {
+      for (final request in path.requests) {
+        for (final tag in request.tags) {
+          tagToRequestWithPath[tag] ??= [];
+          tagToRequestWithPath[tag]!.add(RequestWithPath(request, path.path));
+        }
+      }
+    }
+    var concatedResult = '';
+    for (final service in tagToRequestWithPath.entries) {
+      final className = getClassNameFromFileName(service.key);
+      final root = SwaggerRoot(
+        basePath: swaggerRoot.basePath,
+        components: swaggerRoot.components,
+        host: swaggerRoot.host,
+        info: swaggerRoot.info,
+        parameters: swaggerRoot.parameters,
+        tags: swaggerRoot.tags,
+        schemes: swaggerRoot.schemes,
+        paths: swaggerRoot.paths,
+      );
+      final classContent =
+          getRequestClassContent(root.host, className, fileName, options);
+      final chopperClientContent = getChopperClientContent(
+          className, root.host, root.basePath, options, hasModels);
 
-    return result;
+      final allMethodsContent = getAllMethodsContent(
+        root,
+        dartCode,
+        options,
+        allEnumNames,
+        dynamicResponses,
+        service.value,
+        basicTypesMap,
+        excludeFromMethodName: 'api/${service.key}',
+      );
+
+      final result = generateFileContent(
+          classContent, chopperClientContent, allMethodsContent);
+
+      concatedResult += result;
+    }
+
+    final services = tagToRequestWithPath.keys
+        .map((e) => getClassNameFromFileName(e))
+        .toList();
+
+    final getters = services
+        .map((e) => '$e get ${e.camelCase} => getService<$e>();')
+        .join('\n');
+    concatedResult += '''
+extension SwaggerExtension on ChopperClient {
+  $getters
+}    
+''';
+
+    final createServiceLines =
+        services.map((e) => '$e.createService(),').join('\n');
+
+    concatedResult += '''
+List<ChopperService> get ${getClassNameFromFileName(fileName).camelCase}Services => [
+  $createServiceLines
+];''';
+
+    return concatedResult;
   }
 
   static List<String> getAllDynamicResponses(String dartCode) {
@@ -104,8 +160,10 @@ $allMethodsContent
     GeneratorOptions options,
     List<String> allEnumNames,
     List<String> dynamicResponses,
-    Map<String, String> basicTypesMap,
-  ) {
+    List<RequestWithPath> requests,
+    Map<String, String> basicTypesMap, {
+    String? excludeFromMethodName,
+  }) {
     final methods = StringBuffer();
 
     final dynamic map = dartCode.isNotEmpty ? jsonDecode(dartCode) : {};
@@ -113,140 +171,145 @@ $allMethodsContent
     final requestBodies =
         components == null ? null : components['requestBodies'];
 
-    swaggerRoot.paths.forEach((SwaggerPath swaggerPath) {
+    requests.forEach((r) {
+      final path = r.path;
+      final swaggerRequest = r.request;
       if (options.excludePaths.isNotEmpty &&
           options.excludePaths
-              .any((exclPath) => RegExp(exclPath).hasMatch(swaggerPath.path))) {
+              .any((exclPath) => RegExp(exclPath).hasMatch(path))) {
         return;
       }
 
       if (options.includePaths.isNotEmpty &&
           !options.includePaths
-              .any((inclPath) => RegExp(inclPath).hasMatch(swaggerPath.path))) {
+              .any((inclPath) => RegExp(inclPath).hasMatch(path))) {
         return;
       }
 
-      swaggerPath.requests
-          .where((SwaggerRequest swaggerRequest) =>
-              swaggerRequest.type.toLowerCase() != requestTypeOptions)
-          .forEach((SwaggerRequest swaggerRequest) {
-        swaggerRequest.parameters = swaggerRequest.parameters
-            .where((element) => element.inParameter.isNotEmpty)
-            .toList();
+      if (swaggerRequest.type.toLowerCase() == requestTypeOptions) {
+        return;
+      }
 
-        final hasFormData = swaggerRequest.parameters.any(
-            (SwaggerRequestParameter swaggerRequestParameter) =>
-                swaggerRequestParameter.inParameter == 'formData');
+      swaggerRequest.parameters = swaggerRequest.parameters
+          .where((element) => element.inParameter.isNotEmpty)
+          .toList();
 
-        String methodName;
-        if (options.usePathForRequestNames ||
-            swaggerRequest.operationId.isEmpty) {
-          methodName = SwaggerModelsGenerator.generateRequestName(
-              swaggerPath.path, swaggerRequest.type);
-        } else {
-          methodName = swaggerRequest.operationId;
+      final hasFormData = swaggerRequest.parameters.any(
+          (SwaggerRequestParameter swaggerRequestParameter) =>
+              swaggerRequestParameter.inParameter == 'formData');
+
+      String methodName;
+      if (options.usePathForRequestNames ||
+          swaggerRequest.operationId.isEmpty) {
+        var correctPath = path;
+        if (excludeFromMethodName != null) {
+          correctPath = correctPath.replaceFirst(excludeFromMethodName, '');
         }
+        methodName = SwaggerModelsGenerator.generateRequestName(
+            correctPath, swaggerRequest.type);
+      } else {
+        methodName = swaggerRequest.operationId.camelCase;
+      }
 
-        if (swaggerRequest.requestBody?.content != null &&
-            swaggerRequest.parameters
-                .every((parameter) => parameter.inParameter != 'body')) {
-          final additionalParameter = swaggerRequest.requestBody?.content;
-          swaggerRequest.parameters.add(SwaggerRequestParameter(
-              inParameter: 'body',
-              name: 'body',
-              isRequired: true,
-              type: _getBodyParameterType(additionalParameter, options),
-              ref: additionalParameter?.ref ??
-                  additionalParameter?.items?.ref ??
-                  ''));
-        }
+      if (swaggerRequest.requestBody?.content != null &&
+          swaggerRequest.parameters
+              .every((parameter) => parameter.inParameter != 'body')) {
+        final additionalParameter = swaggerRequest.requestBody?.content;
+        swaggerRequest.parameters.add(SwaggerRequestParameter(
+            inParameter: 'body',
+            name: 'body',
+            isRequired: true,
+            type: _getBodyParameterType(additionalParameter, options),
+            ref: additionalParameter?.ref ??
+                additionalParameter?.items?.ref ??
+                ''));
+      }
 
-        final requestBody = swaggerRequest.requestBody?.ref;
-        if (requestBody?.isNotEmpty == true) {
-          var requestBodyType = requestBody!.split('/').last;
+      final requestBody = swaggerRequest.requestBody?.ref;
+      if (requestBody?.isNotEmpty == true) {
+        var requestBodyType = requestBody!.split('/').last;
 
-          final bodySchema =
-              requestBodies == null ? null : requestBodies[requestBodyType];
+        final bodySchema =
+            requestBodies == null ? null : requestBodies[requestBodyType];
 
-          if (bodySchema?.isNotEmpty == true) {
-            final content = bodySchema['content'] as Map?;
-            final firstContent =
-                content == null ? null : content[content.keys.first];
-            final schema = firstContent['schema'] as Map;
-            if (schema.containsKey('\$ref')) {
-              requestBodyType = schema['\$ref'].split('/').last.toString();
-            }
+        if (bodySchema?.isNotEmpty == true) {
+          final content = bodySchema['content'] as Map?;
+          final firstContent =
+              content == null ? null : content[content.keys.first];
+          final schema = firstContent['schema'] as Map;
+          if (schema.containsKey('\$ref')) {
+            requestBodyType = schema['\$ref'].split('/').last.toString();
           }
-
-          swaggerRequest.parameters.add(SwaggerRequestParameter(
-              inParameter: 'body',
-              name: 'body',
-              isRequired: true,
-              type: requestBodyType.capitalize));
         }
 
-        if (swaggerRequest.parameters
-                .every((parameter) => parameter.inParameter != 'body') &&
-            swaggerRequest.type.toLowerCase() == 'post') {
-          swaggerRequest.parameters.add(SwaggerRequestParameter(
-              inParameter: 'body', name: 'body', isRequired: true));
-        }
+        swaggerRequest.parameters.add(SwaggerRequestParameter(
+            inParameter: 'body',
+            name: 'body',
+            isRequired: true,
+            type: requestBodyType.capitalize));
+      }
 
-        final allParametersContent = getAllParametersContent(
-          listParameters: swaggerRequest.parameters,
+      if (swaggerRequest.parameters
+              .every((parameter) => parameter.inParameter != 'body') &&
+          swaggerRequest.type.toLowerCase() == 'post') {
+        swaggerRequest.parameters.add(SwaggerRequestParameter(
+            inParameter: 'body', name: 'body', isRequired: true));
+      }
+
+      final allParametersContent = getAllParametersContent(
+        listParameters: swaggerRequest.parameters,
+        ignoreHeaders: options.ignoreHeaders,
+        path: path,
+        allEnumNames: allEnumNames,
+        requestType: swaggerRequest.type,
+        useRequiredAttribute: options.useRequiredAttributeForHeaders,
+        options: options,
+      );
+
+      final hasEnums = swaggerRequest.parameters.any((parameter) =>
+          parameter.items?.enumValues.isNotEmpty == true ||
+          parameter.item?.enumValues.isNotEmpty == true ||
+          parameter.schema?.enumValues.isNotEmpty == true ||
+          allEnumNames.contains(
+              'enums.${parameter.ref.isEmpty ? "" : parameter.ref.split("/").last.pascalCase}'));
+
+      final enumInBodyName = swaggerRequest.parameters.firstWhereOrNull(
+        (parameter) =>
+            parameter.inParameter == 'body' &&
+            (parameter.items?.enumValues.isNotEmpty == true ||
+                parameter.item?.enumValues.isNotEmpty == true ||
+                parameter.schema?.enumValues.isNotEmpty == true),
+      );
+
+      final parameterCommentsForMethod =
+          getParameterCommentsForMethod(swaggerRequest.parameters, options);
+
+      final returnTypeName = getReturnTypeName(
+        swaggerRequest.responses,
+        path,
+        swaggerRequest.type,
+        options.responseOverrideValueMap,
+        dynamicResponses,
+        basicTypesMap,
+        options,
+      );
+
+      final generatedMethod = getMethodContent(
+          summary: swaggerRequest.summary,
+          typeRequest: swaggerRequest.type,
+          methodName: methodName,
+          parametersContent: allParametersContent,
+          parametersComments: parameterCommentsForMethod,
+          requestPath: path,
+          hasFormData: hasFormData,
+          returnType: returnTypeName,
+          hasEnums: hasEnums,
+          enumInBodyName: enumInBodyName?.name ?? '',
           ignoreHeaders: options.ignoreHeaders,
-          path: swaggerPath.path,
           allEnumNames: allEnumNames,
-          requestType: swaggerRequest.type,
-          useRequiredAttribute: options.useRequiredAttributeForHeaders,
-          options: options,
-        );
+          parameters: swaggerRequest.parameters);
 
-        final hasEnums = swaggerRequest.parameters.any((parameter) =>
-            parameter.items?.enumValues.isNotEmpty == true ||
-            parameter.item?.enumValues.isNotEmpty == true ||
-            parameter.schema?.enumValues.isNotEmpty == true ||
-            allEnumNames.contains(
-                'enums.${parameter.ref.isEmpty ? "" : parameter.ref.split("/").last.pascalCase}'));
-
-        final enumInBodyName = swaggerRequest.parameters.firstWhereOrNull(
-          (parameter) =>
-              parameter.inParameter == 'body' &&
-              (parameter.items?.enumValues.isNotEmpty == true ||
-                  parameter.item?.enumValues.isNotEmpty == true ||
-                  parameter.schema?.enumValues.isNotEmpty == true),
-        );
-
-        final parameterCommentsForMethod =
-            getParameterCommentsForMethod(swaggerRequest.parameters, options);
-
-        final returnTypeName = getReturnTypeName(
-          swaggerRequest.responses,
-          swaggerPath.path,
-          swaggerRequest.type,
-          options.responseOverrideValueMap,
-          dynamicResponses,
-          basicTypesMap,
-          options,
-        );
-
-        final generatedMethod = getMethodContent(
-            summary: swaggerRequest.summary,
-            typeRequest: swaggerRequest.type,
-            methodName: methodName,
-            parametersContent: allParametersContent,
-            parametersComments: parameterCommentsForMethod,
-            requestPath: swaggerPath.path,
-            hasFormData: hasFormData,
-            returnType: returnTypeName,
-            hasEnums: hasEnums,
-            enumInBodyName: enumInBodyName?.name ?? '',
-            ignoreHeaders: options.ignoreHeaders,
-            allEnumNames: allEnumNames,
-            parameters: swaggerRequest.parameters);
-
-        methods.writeln(generatedMethod);
-      });
+      methods.writeln(generatedMethod);
     });
 
     return methods.toString();
@@ -436,7 +499,7 @@ $allMethodsContent
       summary = summary.replaceAll(RegExp(r'\n|\r|\t'), ' ');
     }
 
-    methodName = abbreviationToCamelCase(methodName.camelCase);
+    //methodName = abbreviationToCamelCase(methodName.camelCase);
     var publicMethod = '';
 
     if (hasEnums) {
@@ -641,7 +704,7 @@ $allMethodsContent
             : 'converter: chopper.JsonConverter(),';
 
     final generatedChopperClient = '''
-  static $fileName create([ChopperClient? client]) {
+  static $fileName createService([ChopperClient? client]) {
     if(client!=null){
       return _\$$fileName(client);
     }

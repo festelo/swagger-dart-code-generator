@@ -12,7 +12,7 @@ class SwaggerAdditionsGenerator {
       final fileName = key.split('/').last.replaceAll('-', '_');
       final className = getClassNameFromFileName(key.split('/').last);
 
-      return 'export \'$fileName.dart\' show $className;';
+      return 'export \'$fileName.dart\' show SwaggerExtension, ${className.camelCase}Services;';
     }).toList();
 
     importsList.sort();
