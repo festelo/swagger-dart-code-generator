@@ -62,6 +62,20 @@ $allMethodsContent
       for (final request in path.requests) {
         for (final tag in request.tags) {
           tagToRequestWithPath[tag] ??= [];
+          request.parameters.add(SwaggerRequestParameter(
+            inParameter: 'header',
+            isRequired: false,
+            description: 'OTP Code',
+            type: 'string',
+            name: 'Grpc-Metadata-X-OTP',
+          ));
+          request.parameters.add(SwaggerRequestParameter(
+            inParameter: 'header',
+            isRequired: false,
+            description: 'Auth Token',
+            type: 'string',
+            name: 'Grpc-Metadata-Authorization',
+          ));
           tagToRequestWithPath[tag]!.add(RequestWithPath(request, path.path));
         }
       }
