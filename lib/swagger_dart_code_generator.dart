@@ -149,7 +149,7 @@ $responses
 
 $requestBodies
 
-${options.withBaseUrl && options.withConverter ? customDecoder : ''}
+${options.withConverter ? customDecoder : ''}
 
 $dateToJson
 """;
