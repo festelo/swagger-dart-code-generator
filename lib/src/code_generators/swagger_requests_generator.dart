@@ -116,7 +116,7 @@ $allMethodsContent
     }
 
     final services = tagToRequestWithPath.keys
-        .map((e) => getClassNameFromFileName(e))
+        .map((e) => '${getClassNameFromFileName(e)}Service')
         .toList();
 
     final getters = services
@@ -265,7 +265,8 @@ List<ChopperService> get ${getClassNameFromFileName(fileName).camelCase}Services
 
       if (swaggerRequest.parameters
               .every((parameter) => parameter.inParameter != 'body') &&
-          swaggerRequest.type.toLowerCase() == 'post') {
+          (swaggerRequest.type.toLowerCase() == 'post' ||
+              swaggerRequest.type.toLowerCase() == 'put')) {
         swaggerRequest.parameters.add(SwaggerRequestParameter(
             inParameter: 'body', name: 'body', isRequired: true));
       }
@@ -738,7 +739,7 @@ List<ChopperService> get ${getClassNameFromFileName(fileName).camelCase}Services
       GeneratorOptions options) {
     final classWithoutChopper = '''
 @ChopperApi()
-abstract class $className extends ChopperService''';
+abstract class ${className}Service extends ChopperService''';
 
     return classWithoutChopper;
   }
