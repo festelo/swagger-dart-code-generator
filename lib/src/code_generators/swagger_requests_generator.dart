@@ -96,7 +96,7 @@ $allMethodsContent
       final classContent =
           getRequestClassContent(root.host, className, fileName, options);
       final chopperClientContent = getChopperClientContent(
-          className, root.host, root.basePath, options, hasModels);
+          '${className}Service', root.host, root.basePath, options, hasModels);
 
       final allMethodsContent = getAllMethodsContent(
         root,
@@ -123,7 +123,7 @@ $allMethodsContent
         .map((e) => '$e get ${e.camelCase} => getService<$e>();')
         .join('\n');
     concatedResult += '''
-extension SwaggerExtension on ChopperClient {
+extension ${getClassNameFromFileName(fileName)}SwaggerExtension on ChopperClient {
   $getters
 }    
 ''';
@@ -206,6 +206,15 @@ List<ChopperService> get ${getClassNameFromFileName(fileName).camelCase}Services
 
       swaggerRequest.parameters = swaggerRequest.parameters
           .where((element) => element.inParameter.isNotEmpty)
+          .toList()
+          .asMap()
+          .map(
+            (key, value) => MapEntry(
+              '${value.name.toLowerCase()}@#@${value.type.toLowerCase()}',
+              value,
+            ),
+          )
+          .values
           .toList();
 
       final hasFormData = swaggerRequest.parameters.any(
