@@ -96,7 +96,11 @@ $allMethodsContent
       final classContent =
           getRequestClassContent(root.host, className, fileName, options);
       final chopperClientContent = getChopperClientContent(
-          '${className}Service', root.host, root.basePath, options, hasModels);
+          '${formatServiceName(className)}',
+          root.host,
+          root.basePath,
+          options,
+          hasModels);
 
       final allMethodsContent = getAllMethodsContent(
         root,
@@ -116,11 +120,12 @@ $allMethodsContent
     }
 
     final services = tagToRequestWithPath.keys
-        .map((e) => '${getClassNameFromFileName(e)}Service')
+        .map((e) => getClassNameFromFileName(e))
         .toList();
 
     final getters = services
-        .map((e) => '$e get ${e.camelCase} => getService<$e>();')
+        .map((e) =>
+            '${formatServiceName(e)} get ${e.camelCase} => getService<${formatServiceName(e)}>();')
         .join('\n');
     concatedResult += '''
 extension ${getClassNameFromFileName(fileName)}SwaggerExtension on ChopperClient {
@@ -128,8 +133,9 @@ extension ${getClassNameFromFileName(fileName)}SwaggerExtension on ChopperClient
 }    
 ''';
 
-    final createServiceLines =
-        services.map((e) => '$e.createService(),').join('\n');
+    final createServiceLines = services
+        .map((e) => '${formatServiceName(e)}.createService(),')
+        .join('\n');
 
     concatedResult += '''
 List<ChopperService> get ${getClassNameFromFileName(fileName).camelCase}Services => [
@@ -716,7 +722,7 @@ List<ChopperService> get ${getClassNameFromFileName(fileName).camelCase}Services
     }
   }
 
-  String getChopperClientContent(String fileName, String host, String basePath,
+  String getChopperClientContent(String className, String host, String basePath,
       GeneratorOptions options, bool hadModels) {
     final baseUrlString = options.withBaseUrl
         ? "baseUrl:  'https://$host$basePath'"
@@ -728,16 +734,16 @@ List<ChopperService> get ${getClassNameFromFileName(fileName).camelCase}Services
             : 'converter: chopper.JsonConverter(),';
 
     final generatedChopperClient = '''
-  static $fileName createService([ChopperClient? client]) {
+  static $className createService([ChopperClient? client]) {
     if(client!=null){
-      return _\$$fileName(client);
+      return _\$$className(client);
     }
 
     final newClient = ChopperClient(
-      services: [_\$$fileName()],
+      services: [_\$$className()],
       $converterString
       $baseUrlString);
-    return _\$$fileName(newClient);
+    return _\$$className(newClient);
   }
 
 ''';
@@ -748,7 +754,7 @@ List<ChopperService> get ${getClassNameFromFileName(fileName).camelCase}Services
       GeneratorOptions options) {
     final classWithoutChopper = '''
 @ChopperApi()
-abstract class ${className}Service extends ChopperService''';
+abstract class ${formatServiceName(className)} extends ChopperService''';
 
     return classWithoutChopper;
   }

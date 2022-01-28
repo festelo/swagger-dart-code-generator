@@ -6,6 +6,11 @@ String getClassNameFromFileName(String file) {
   return result.join();
 }
 
+String formatServiceName(String serviceNameFromSwagger) {
+  if (serviceNameFromSwagger.endsWith('Service')) return serviceNameFromSwagger;
+  return '${serviceNameFromSwagger}Service';
+}
+
 String getFileNameWithoutExtension(String file) {
   return file.split('.').first;
 }

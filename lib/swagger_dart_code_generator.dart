@@ -15,6 +15,7 @@ const String _outputEnumsFileExtension = '.enums.swagger.dart';
 const String _outputResponsesFileExtension = '.responses.swagger.dart';
 const String _indexFileName = 'client_index.dart';
 const String _mappingFileName = 'client_mapping.dart';
+const String _converterFileName = 'json_converter.dart';
 
 Map<String, List<String>> _generateExtensions(GeneratorOptions options) {
   final filesList = Directory(options.inputFolder).listSync().where(
@@ -35,6 +36,8 @@ Map<String, List<String>> _generateExtensions(GeneratorOptions options) {
   ///Register additional outputs in first input
   result[filesList.first.path]!.add('${options.outputFolder}$_indexFileName');
   result[filesList.first.path]!.add('${options.outputFolder}$_mappingFileName');
+  result[filesList.first.path]!
+      .add('${options.outputFolder}$_converterFileName');
 
   return result;
 }
@@ -93,9 +96,6 @@ class SwaggerDartCodeGenerator implements Builder {
         getFileNameWithoutExtension(fileNameWithExtension),
         options);
 
-    final customDecoder = codeGenerator.generateCustomJsonConverter(contents,
-        getFileNameWithoutExtension(fileNameWithExtension), models.isNotEmpty);
-
     final dateToJson = codeGenerator.generateDateToJson(contents);
 
     final copyAssetId = AssetId(buildStep.inputId.package,
@@ -104,7 +104,7 @@ class SwaggerDartCodeGenerator implements Builder {
     await buildStep.writeAsString(
         copyAssetId,
         _generateFileContent(imports, requests, converter, models, responses,
-            requestBodies, customDecoder, dateToJson));
+            requestBodies, dateToJson));
 
     if (enums.isNotEmpty) {
       ///Write enums
@@ -130,7 +130,6 @@ class SwaggerDartCodeGenerator implements Builder {
       String models,
       String responses,
       String requestBodies,
-      String customDecoder,
       String dateToJson) {
     final result = """
 $imports
@@ -148,8 +147,6 @@ $models
 $responses
 
 $requestBodies
-
-${options.withConverter ? customDecoder : ''}
 
 $dateToJson
 """;
@@ -176,7 +173,8 @@ $dateToJson
     final indexAssetId =
         AssetId(inputId.package, '${options.outputFolder}$_indexFileName');
 
-    final imports = codeGenerator.generateIndexes(swaggerCode, buildExtensions);
+    final imports = codeGenerator.generateIndexes(
+        swaggerCode, buildExtensions, options.withConverter);
 
     await buildStep.writeAsString(indexAssetId, _formatter.format(imports));
 
@@ -188,6 +186,12 @@ $dateToJson
           swaggerCode, buildExtensions, hasModels);
 
       await buildStep.writeAsString(mappingAssetId, _formatter.format(mapping));
+
+      final converterId = AssetId(
+          inputId.package, '${options.outputFolder}$_converterFileName');
+
+      final converter = codeGenerator.generateJsonConverter(swaggerCode);
+      await buildStep.writeAsString(converterId, _formatter.format(converter));
     }
   }
 }
